@@ -1,0 +1,4 @@
+pymupdf~=1.25.5
+flask~=3.1.0
+reportlab
+pillow~=11.2.1
