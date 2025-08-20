@@ -9,7 +9,7 @@ SCALE = DPI / 72  # PDFS use 72 points per inch
 
 for i, page in enumerate(pdf):
     page: pymupdf.Page
-    text_instances = page.search_for("Using calculus")
+    text_instances = page.search_for("1. ")
     if not text_instances:
         continue
 
