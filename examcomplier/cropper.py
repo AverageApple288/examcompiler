@@ -1,4 +1,5 @@
 import pymupdf
+from PIL import Image
 
 pdf = pymupdf.open("../pdf/physics_past_paper.pdf")
 
@@ -9,55 +10,73 @@ MARGIN_TOP = 10
 MARGIN_LEFT = 10
 MARGIN_BOTTOM = -10
 
-completed_questions = [0]
+# Loop through questions instead of pages
+for q_num in range(1, 50):
+    print(f"Searching for question {q_num}...")
+    question_image_parts = []
+    is_in_question = False
 
-for i, page in enumerate(pdf):
-    print(f"Processing page {i + 1}...")
-    page: pymupdf.Page
-    pix: pymupdf.Pixmap = page.get_pixmap(dpi=DPI)
-    img = pix.pil_image
+    # Loop through pages to find all parts of a question
+    for i, page in enumerate(pdf):
+        page: pymupdf.Page
 
-    for q_num in range(completed_questions[-1]+1, 50):
-        question_1_instances = page.search_for(f"{q_num}. ")
-        if question_1_instances:
-            completed_questions.append(q_num)
-        else:
-            continue  # Skip if the current question number isn't on the page
-
-        print(f"Processing question {q_num}...")
-
-        question_2_instances = page.search_for(f"{q_num + 1}. ")
+        question_start_instances = page.search_for(f"{q_num}. ")
+        question_end_instances = page.search_for(f"{q_num + 1}. ")
         end_of_paper = page.search_for("END OF QUESTION PAPER")
         end_of_page = page.search_for("page")
         turn_page = page.search_for("Turn over")
 
-        # Define the crop area
-        q1_rect: pymupdf.Rect = question_1_instances[0]
-        x0 = q1_rect.x0 - MARGIN_LEFT
-        y0 = q1_rect.y0 - MARGIN_TOP
-        x1 = page.rect.width  # Use the full page width
+        x0, y0, x1, y1 = 0, 0, page.rect.width, page.rect.height
 
-        if question_2_instances:
-            # If the next question is on the same page, crop to its top
-            q2_rect: pymupdf.Rect = question_2_instances[0]
-            y1 = q2_rect.y0 + MARGIN_BOTTOM
-        elif end_of_paper:
-            q2_rect: pymupdf.Rect = end_of_paper[0]
-            y1 = q2_rect.y0 + MARGIN_BOTTOM
-        elif turn_page:
-            q2_rect: pymupdf.Rect = turn_page[0]
-            y1 = q2_rect.y0 + MARGIN_BOTTOM
-        elif end_of_page:
-            q2_rect: pymupdf.Rect = end_of_page[0]
-            y1 = q2_rect.y0 + MARGIN_BOTTOM
-        else:
-            # Otherwise, crop to the bottom of the page
-            y1 = page.rect.height
+        if not is_in_question and question_start_instances:
+            # This is the first page of the question
+            is_in_question = True
+            q_start_rect: pymupdf.Rect = question_start_instances[0]
+            y0 = q_start_rect.y0 - MARGIN_TOP
+            x0 = q_start_rect.x0 - MARGIN_LEFT
 
-        # Crop the image using scaled coordinates
-        img().crop((
-            x0 * SCALE,
-            y0 * SCALE,
-            x1 * SCALE,
-            y1 * SCALE
-        )).save(f"../images/question{q_num}.png")
+        if is_in_question:
+            # Determine the bottom boundary for the crop
+            if question_end_instances:
+                q_end_rect: pymupdf.Rect = question_end_instances[0]
+                y1 = q_end_rect.y0 + MARGIN_BOTTOM
+            elif end_of_paper:
+                q_end_rect: pymupdf.Rect = end_of_paper[0]
+                y1 = q_end_rect.y0 + MARGIN_BOTTOM
+            elif turn_page:
+                q_end_rect: pymupdf.Rect = turn_page[0]
+                y1 = q_end_rect.y0 + MARGIN_BOTTOM
+            elif end_of_page:
+                q_end_rect: pymupdf.Rect = end_of_page[0]
+                y1 = q_end_rect.y0 + MARGIN_BOTTOM
+
+            # Define the crop area for the current page
+            crop_rect = pymupdf.Rect(x0, y0, x1, y1)
+
+            # Crop the page and add the image to our list
+            pix: pymupdf.Pixmap = page.get_pixmap(dpi=DPI, clip=crop_rect)
+            question_image_parts.append(pix.pil_image())
+
+            # If the question ends on this page, stop searching
+            if question_end_instances or end_of_paper:
+                break
+
+            # If question continues, reset for next page (top-to-bottom crop)
+            is_in_question = True
+            x0, y0 = 0, 0
+
+    # Stitch the image parts together if any were found
+    if question_image_parts:
+        print(f"Processing and saving question {q_num}...")
+        widths, heights = zip(*(i.size for i in question_image_parts))
+        total_height = sum(heights)
+        max_width = max(widths)
+
+        combined_image = Image.new('RGB', (max_width, total_height), (255, 255, 255))
+
+        y_offset = 0
+        for im in question_image_parts:
+            combined_image.paste(im, (0, y_offset))
+            y_offset += im.size[1]
+
+        combined_image.save(f"../images/question{q_num}.png")
